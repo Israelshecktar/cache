@@ -1,0 +1,157 @@
+#!/bin/bash
+
+# Function to exit the script
+function exiting ()
+{
+	echo -e "\nOperation aborted!!!....................."
+	exit 1
+}
+
+# Function to check operation status
+function check_status()
+{
+	echo "....................................................."
+	if [ $exit_status -eq 0 ]; then
+		echo "$1 successfully."
+		echo "....................................................."
+	else
+		echo "Oops! Something went wrong. Error $2."
+		echo "Exit status code: $exit_status"
+		echo "....................................................."
+		exit 1
+	fi
+}
+
+# Function to clone repository and set up local user
+function clone_repo()
+{
+	git clone "https://$GTOKEN@github.com/$GUSERNAME/$REPONAME.git"
+	exit_status=$?
+	check_status "Repository cloned" "cloning repository"
+
+	cd "$REPONAME"
+	echo -e "Setting up the local user (commit author) for this repo\nUser: $GUSERNAME\nEmail: $GEMAIL"
+	git config --global user.name "$GUSERNAME"
+	git config --global user.email "$GEMAIL"
+}
+
+# Function to create default README and push to remote
+function create_readme()
+{
+	echo -e "$REPONAME and README were auto-created by [**emmanueldev247**](https://github.com/emmanueldev247/)" > README.md
+	echo -e "\n\nPushing to remote repository...\n"
+	git add .
+	git commit -m "$REPONAME auto created"
+	git push
+}
+
+function get_git_details()
+{
+	# Prompt user for GitHub username
+	read -p "Enter GitHub username >>> " GUSERNAME
+	if [[ -z "$GUSERNAME" ]]; then
+		echo -e "You did not answer the question."
+		exiting
+	fi
+
+	# Check if the username exists
+	RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "https://api.github.com/users/$GUSERNAME")
+
+	if [ "$RESPONSE" -ne 200 ]; then
+		echo "Username $GUSERNAME does not exist on GitHub or there was an issue."
+		exiting
+	fi
+
+	# Prompt user for GitHub personal access token
+	read -p "Enter your GitHub personal access token >>> " GTOKEN
+	if [[ -z "$GTOKEN" ]]; then
+		echo -e "You did not answer the question."
+		exiting
+	fi
+
+	# Prompt user for GitHub Email
+	read -p "Enter your GitHub Email >>> " GEMAIL
+	if [[ -z "$GEMAIL" ]]; then
+		echo -e "You did not answer the question."
+		exiting
+	fi
+}
+
+# ENTRY-POINT
+
+# GitHub credentials
+# Enter your details within the quotations to avoid repeated entry
+
+GUSERNAME=""
+GTOKEN=""
+GEMAIL=""
+
+# Check the number of command-line arguments
+if [ "$#" -ne 1 ]; then
+	echo -e "You can't create a repo without a name...\n"
+	echo "Usage: $0 <repository_name>"
+    exiting
+fi
+
+REPONAME="$1"
+exit_status=0
+
+if [[ -z "$GUSERNAME" ]]; then
+	get_git_details
+fi
+
+# Check if the repository already exists
+existing_repo=$(curl -u "$GUSERNAME:$GTOKEN" "https://api.github.com/user/repos" 2>/dev/null | jq -r ".[] | select(.name == \"$REPONAME\") | .name")
+[[ "$existing_repo" == "$REPONAME" ]] && { echo "Repository \"$REPONAME\" already exists on GitHub. Aborting creation."; exiting; }
+
+
+# Prompt user for private/public option
+read -p "Do you want the repository to be private? (y/n) >>> " PRIVATE_OPTION
+if [[ -z "$PRIVATE_OPTION" ]]; then
+	echo -e "You did not answer the question."
+	exiting
+elif [[ "$PRIVATE_OPTION" =~ [yY] ]]; then
+	PRIVATE_OPTION="true"
+elif [[ "$PRIVATE_OPTION" =~ [nN] ]]; then
+	PRIVATE_OPTION="false"
+else
+	echo -e "Invalid response."
+	exiting
+fi
+
+# Check current directory
+echo -e "\nYou are creating the repository \"$REPONAME\" in the Account \"https://github.com/$GUSERNAME\"...\n"
+echo -e "Please check your PATH and CURRENT DIRECTORY to ensure you are not creating this repo inside an existing repo."
+echo -e "Current Directory is: $PWD\n\n"
+
+read -p "Do you want to abort to fix this? (y/n) >>> " RESP
+
+if [[ -z "$RESP" ]]; then
+	echo -e "You did not answer the question."
+	exiting
+elif [[ "$RESP" =~ [yY] ]]; then
+	echo -e "Aborting..."
+	exiting
+elif [[ "$RESP" =~ [nN] ]]; then
+	echo -e "Ok."
+else
+	echo -e "Invalid response."
+	exiting
+fi
+
+# Create the repository
+echo -e "\nCreating the repository as $( [[ "$PRIVATE_OPTION" == "true" ]] && echo "private" || echo "public" )..."
+response=$(curl -u "$GUSERNAME:$GTOKEN" -X POST "https://api.github.com/user/repos" -d '{"name":"'$REPONAME'", "private":'"$PRIVATE_OPTION"'}' 2>&1)
+exit_status_code=$?
+
+if [[ $response == *"\"name\": \"$REPONAME\""* ]]; then
+	exit_status=0
+else
+	exit_status=1
+	echo "Error creating repository: $response"
+fi
+
+check_status "Repository created" "creating repository"
+clone_repo
+create_readme
+echo -e ""

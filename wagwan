@@ -1,0 +1,101 @@
+#!/bin/bash
+
+# Function to exit the script
+function exiting ()
+{
+	echo -e "\nOperation aborted!!!....................."
+	exit 1
+}
+
+
+# Function to check operation status
+function check_status() {
+	echo "....................................................."
+	if [ $exit_status -eq 0 ]; then
+		echo "$1 successfully."
+		echo "....................................................."
+	else
+		echo "Oops! Something went wrong. Error $2."
+		echo "Exit status code: $exit_status"
+		echo "....................................................."
+		exit 1
+	fi
+}
+
+# Function to clone repository and set up local user
+function clone_repo() {
+	git clone "https://$GTOKEN@github.com/$GUSERNAME/$REPONAME.git"
+	exit_status=$?
+	check_status "Repository cloned" "cloning repository"
+
+	cd "$REPONAME"
+	echo -e "Setting up the local user (commit author) for this repo\nUser: $GUSERNAME\nEmail: $GEMAIL"
+	git config --global user.name "$GUSERNAME"
+	git config --global user.email "$GEMAIL"
+}
+
+
+function get_git_details()
+{
+	# Prompt user for GitHub username
+	read -p "Enter GitHub username >>> " GUSERNAME
+	if [[ -z "$GUSERNAME" ]]; then
+		echo -e "You did not answer the question."
+		exiting
+	fi
+
+	# Check if the username exists
+	RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "https://api.github.com/users/$GUSERNAME")
+
+	if [ "$RESPONSE" -ne 200 ]; then
+		echo "Username $GUSERNAME does not exist on GitHub or there was an issue."
+		exiting
+	fi
+
+	# Prompt user for GitHub personal access token
+	read -p "Enter your GitHub personal access token >>> " GTOKEN
+	if [[ -z "$GTOKEN" ]]; then
+		echo -e "You did not answer the question."
+		exiting
+	fi
+
+	# Prompt user for GitHub Email
+	read -p "Enter your GitHub Email >>> " GEMAIL
+	if [[ -z "$GEMAIL" ]]; then
+		echo -e "You did not answer the question."
+		exiting
+	fi
+}
+
+# ENTRY-POINT
+
+# GitHub credentials
+# Enter your details within the quotations to avoid repeated entry
+
+GUSERNAME=""
+GTOKEN=""
+GEMAIL=""
+
+# Check the number of command-line arguments
+if [ "$#" -ne 1 ]; then
+	echo -e "You can't clone a repo without a name...\n"
+	echo "Usage: $0 <repository_name>"
+    exiting
+fi
+
+REPONAME="$1"
+exit_status=0
+
+
+if [[ -z "$GUSERNAME" ]]; then
+	get_git_details
+fi
+
+
+
+# Check if the repository exists
+existing_repo=$(curl -u "$GUSERNAME:$GTOKEN" "https://api.github.com/user/repos" 2>/dev/null | jq -r ".[] | select(.name == \"$REPONAME\") | .name")
+[[ "$existing_repo" != "$REPONAME" ]] && { echo "Repository \"$REPONAME\" not found on \"https://github.com/$GUSERNAME\"... Aborting cloning."; exiting; }
+
+clone_repo
+echo -e ""
